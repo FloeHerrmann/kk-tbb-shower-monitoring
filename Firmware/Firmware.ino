@@ -9,6 +9,8 @@
 #include <EEPROM.h>
 #include <SPI.h>
 #include <GD2.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -29,6 +31,9 @@
 // Divider to get the water amout from the flow sensor impulses
 #define FLOW_SENSOR_DIVIDER 100
 
+// Pint that is used for the communication with the temperature sensors
+#define ONE_WIRE_BUS_PIN 14
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 // Array for storing the flow sensor samples
@@ -43,8 +48,10 @@ boolean ResetButtonIsPressed = false;
 // Is true if the "Settings" icon is pressed, otherwise false
 boolean SettingsButtonIsPressed = false;
 
+boolean ShowerIsRunning = false;
+
 // Helper variable for taking samples
-ulong SampleTimeHelper;
+ulong SampleTimeHelper = 0;
 
 // Helper variable for the number of taken samples
 uint NumberOfSamplesHelper = 0;
@@ -52,9 +59,20 @@ uint NumberOfSamplesHelper = 0;
 // Helper variable for the x-axis difference between two values
 uint XAxisFactor = 0;
 
-// Counter for the pulses of the flow sensor
+// Helper array for the addresses of our temperature sensors
+DeviceAddress WarmWaterSensorAddress = { 0x28, 0xF1 , 0xAC , 0x61 , 0x05 , 0x00 , 0x00 , 0x63 };
+
+// Counter for the impulses of the flow sensor during the last sample interval
 volatile ulong FlowSensorPulses = 0;
+
+// Counter the total amount of flow sensor impulses
 volatile ulong TotalFlowSensorPulses = 0;
+
+// Setup a OneWire instance to communicate with OneWire devices
+OneWire OneWireBus( ONE_WIRE_BUS_PIN );
+
+// Setup a DallesTemperature instance to get temperature from our sensors
+DallasTemperature TemperatureSensors( &OneWireBus );
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void setup() {
@@ -76,6 +94,10 @@ void setup() {
 	// Initialize variables
 	SampleTimeHelper = millis();
 	XAxisFactor = (int)( 222.0 / (float)SAMPLES );
+
+	// Start the communication with our temperature sensors
+	TemperatureSensors.begin();
+	TemperatureSensors.setResolution( WarmWaterSensorAddress , 9 );
 
 	// Attach an interrupt for the flow sensor
 	attachInterrupt( FLOW_SENSOR_PIN , CountImpulses , FALLING) ;
@@ -102,25 +124,31 @@ void loop () {
 		}
 	}
 
-
 	if( millis() - SampleTimeHelper >= SAMPLES_INTERVALL ) {
 		float pulsesF = ((float)FlowSensorPulses) / ((float)FLOW_SENSOR_DIVIDER);
+		TemperatureSensors.requestTemperatures();
+		float temperatureF = TemperatureSensors.getTempC( WarmWaterSensorAddress );
 		if( NumberOfSamplesHelper < SAMPLES ) {
-			WaterFlowValues[ NumberOfSamplesHelper++ ] = pulsesF;
+			WaterFlowValues[ NumberOfSamplesHelper ] = pulsesF;
+			TemperatureValues[ NumberOfSamplesHelper ] = temperatureF;
+			NumberOfSamplesHelper++;
 		} else {
 			for( uint index = 0 ; index < (SAMPLES-1) ; index++ ) {
 				WaterFlowValues[ index ] = WaterFlowValues[ index + 1 ];
+				TemperatureValues[ index ] = TemperatureValues[ index + 1 ];
 			}
 			WaterFlowValues[ (SAMPLES-1) ] = pulsesF;
+			TemperatureValues[ (SAMPLES-1) ] = temperatureF;
 		}
 		TotalFlowSensorPulses += FlowSensorPulses;
 		FlowSensorPulses = 0;
 		DrawBackground();
 		DrawTouchTags();
-		DrawWaterConsumption();
+		DrawCharts();
 		GD.swap();
 		SampleTimeHelper = millis();
 	}
+	
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -129,11 +157,14 @@ void CountImpulses( ){
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void DrawWaterConsumption(){
+void DrawCharts(){
 
 	float OffsetFactor = 96.0 / 4.0;
+	uint xStartCordinate = 335;
+	uint yStartCordinate = 11;
 
 	GD.ColorRGB( 151 , 187 , 205 );
+	GD.ColorA( 255 );
 	GD.LineWidth( 1 * 10 );
   	GD.Begin( LINE_STRIP );
 
@@ -142,11 +173,12 @@ void DrawWaterConsumption(){
 			float xOffsetF = WaterFlowValues[ index ] * OffsetFactor;
 			int xOffset = (int)xOffsetF;
 			int yOffset = index * XAxisFactor;
-			GD.Vertex2ii( 335 + xOffset , 11 + yOffset );
+			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset - 1 );
 		}
 	}
 
 	GD.ColorRGB( 151 , 187 , 205 );
+	GD.ColorA( 255 );
 	GD.PointSize( 16 * 2 );
 	GD.Begin( POINTS );
 
@@ -155,9 +187,45 @@ void DrawWaterConsumption(){
 			float xOffsetF = WaterFlowValues[ index ] * OffsetFactor;
 			int xOffset = (int)xOffsetF;
 			int yOffset = index * XAxisFactor;
-			GD.Vertex2ii( 335 + xOffset , 11 + yOffset );
+			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset - 1 );
 		}
 	}
+
+	OffsetFactor = 96.0 / 60.0;
+	xStartCordinate = 182;
+	yStartCordinate = 11;
+
+	GD.ColorRGB( 208 , 2 , 27 );
+	GD.ColorA( 255 );
+	GD.LineWidth( 1 * 10 );
+  	GD.Begin( LINE_STRIP );
+
+  	for( uint16_t index = 0 ; index < SAMPLES ; index++ ) {
+  		if( TemperatureValues[index] != -1.0 ) {
+			float xOffsetF = TemperatureValues[ index ] * OffsetFactor;
+			int xOffset = (int)xOffsetF;
+			int yOffset = index * XAxisFactor;
+			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset - 1 );
+		}
+	}
+
+	GD.ColorRGB( 208 , 2 , 27 );
+	GD.ColorA( 255 );
+	GD.PointSize( 16 * 2 );
+	GD.Begin( POINTS );
+
+	for( uint16_t index = 0 ; index < SAMPLES ; index++ ) {
+		if( TemperatureValues[ index ] != -1.0 ) {
+			float xOffsetF = TemperatureValues[ index ] * OffsetFactor;
+			int xOffset = (int)xOffsetF;
+			int yOffset = index * XAxisFactor;
+			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset - 1 );
+		}
+	}
+
+	OffsetFactor = 96.0 / 4.0;
+	xStartCordinate = 335;
+	yStartCordinate = 11;
 
 	for( uint16_t index = 0 ; index < (SAMPLES-1) ; index++ ) {
 		if( WaterFlowValues[ index + 1 ] != -1.0 ) {
@@ -166,18 +234,43 @@ void DrawWaterConsumption(){
 			Poly waterFlow;
 			waterFlow.begin();
 			int xOffset = (int)( WaterFlowValues[ index ] * OffsetFactor );
-			int xCordinate = ( 16 * 335 ) + 16 * xOffset;
-			int yCordinate = ( 16 * 11 ) + 16 * XAxisFactor * index;
-			waterFlow.v( 16 * 335 , yCordinate );
+			int xCordinate = ( 16 * xStartCordinate ) + 16 * xOffset;
+			int yCordinate = ( 16 * yStartCordinate ) + 16 * XAxisFactor * index;
+			waterFlow.v( 16 * xStartCordinate , yCordinate );
 			waterFlow.v( xCordinate , yCordinate );
 			xOffset = (int)( WaterFlowValues[ index + 1 ] * OffsetFactor );
-			xCordinate = ( 16 * 335 ) + 16 * xOffset;
-			yCordinate = ( 16 * 11 ) + 16 * XAxisFactor * ( index + 1 );
+			xCordinate = ( 16 * xStartCordinate ) + 16 * xOffset;
+			yCordinate = ( 16 * yStartCordinate ) + 16 * XAxisFactor * ( index + 1 );
 			waterFlow.v( xCordinate , yCordinate );
-			waterFlow.v( 16 * 335 , yCordinate );
+			waterFlow.v( 16 * xStartCordinate , yCordinate );
 			waterFlow.draw();
 		}
 	}
+
+	OffsetFactor = 96.0 / 60.0;
+	xStartCordinate = 182;
+	yStartCordinate = 11;
+
+	for( uint16_t index = 0 ; index < (SAMPLES-1) ; index++ ) {
+		if( TemperatureValues[ index + 1 ] != -1.0 ) {
+			GD.ColorRGB( 208 , 2 , 27 );
+			GD.ColorA( 60 );
+			Poly waterFlow;
+			waterFlow.begin();
+			int xOffset = (int)( TemperatureValues[ index ] * OffsetFactor );
+			int xCordinate = ( 16 * xStartCordinate ) + 16 * xOffset;
+			int yCordinate = ( 16 * yStartCordinate ) + 16 * XAxisFactor * index;
+			waterFlow.v( 16 * xStartCordinate , yCordinate );
+			waterFlow.v( xCordinate , yCordinate );
+			xOffset = (int)( TemperatureValues[ index + 1 ] * OffsetFactor );
+			xCordinate = ( 16 * xStartCordinate ) + 16 * xOffset;
+			yCordinate = ( 16 * yStartCordinate ) + 16 * XAxisFactor * ( index + 1 );
+			waterFlow.v( xCordinate , yCordinate );
+			waterFlow.v( 16 * xStartCordinate , yCordinate );
+			waterFlow.draw();
+		}
+	}
+
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

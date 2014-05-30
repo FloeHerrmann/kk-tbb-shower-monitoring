@@ -11,6 +11,7 @@
 #include <GD2.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include "interface_assets.h"
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -180,7 +181,6 @@ void loop () {
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void CountImpulses( ){
 	FlowSensorPulses = FlowSensorPulses + 1;
-	//ImpulsesTimeHelper = millis();
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -200,7 +200,7 @@ void DrawCharts(){
 			float xOffsetF = WaterFlowValues[ index ] * OffsetFactor;
 			int xOffset = (int)xOffsetF;
 			int yOffset = index * XAxisFactor;
-			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset - 1 );
+			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset );
 		}
 	}
 
@@ -214,7 +214,7 @@ void DrawCharts(){
 			float xOffsetF = WaterFlowValues[ index ] * OffsetFactor;
 			int xOffset = (int)xOffsetF;
 			int yOffset = index * XAxisFactor;
-			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset - 1 );
+			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset );
 		}
 	}
 
@@ -232,7 +232,7 @@ void DrawCharts(){
 			float xOffsetF = TemperatureValues[ index ] * OffsetFactor;
 			int xOffset = (int)xOffsetF;
 			int yOffset = index * XAxisFactor;
-			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset - 1 );
+			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset );
 		}
 	}
 
@@ -246,12 +246,12 @@ void DrawCharts(){
 			float xOffsetF = TemperatureValues[ index ] * OffsetFactor;
 			int xOffset = (int)xOffsetF;
 			int yOffset = index * XAxisFactor;
-			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset - 1 );
+			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset );
 		}
 	}
 
 	OffsetFactor = 96.0 / 4.0;
-	xStartCordinate = 335;
+	xStartCordinate = 336;
 	yStartCordinate = 11;
 
 	for( uint16_t index = 0 ; index < (SAMPLES-1) ; index++ ) {
@@ -262,12 +262,12 @@ void DrawCharts(){
 			waterFlow.begin();
 			int xOffset = (int)( WaterFlowValues[ index ] * OffsetFactor );
 			int xCordinate = ( 16 * xStartCordinate ) + 16 * xOffset;
-			int yCordinate = ( 16 * yStartCordinate ) + 16 * XAxisFactor * index;
+			int yCordinate = 1 + ( 16 * yStartCordinate ) + 16 * XAxisFactor * index;
 			waterFlow.v( 16 * xStartCordinate , yCordinate );
 			waterFlow.v( xCordinate , yCordinate );
 			xOffset = (int)( WaterFlowValues[ index + 1 ] * OffsetFactor );
 			xCordinate = ( 16 * xStartCordinate ) + 16 * xOffset;
-			yCordinate = ( 16 * yStartCordinate ) + 16 * XAxisFactor * ( index + 1 );
+			yCordinate = 1 + ( 16 * yStartCordinate ) + 16 * XAxisFactor * ( index + 1 );
 			waterFlow.v( xCordinate , yCordinate );
 			waterFlow.v( 16 * xStartCordinate , yCordinate );
 			waterFlow.draw();
@@ -275,7 +275,7 @@ void DrawCharts(){
 	}
 
 	OffsetFactor = 96.0 / 60.0;
-	xStartCordinate = 182;
+	xStartCordinate = 183;
 	yStartCordinate = 11;
 
 	for( uint16_t index = 0 ; index < (SAMPLES-1) ; index++ ) {
@@ -286,12 +286,12 @@ void DrawCharts(){
 			waterFlow.begin();
 			int xOffset = (int)( TemperatureValues[ index ] * OffsetFactor );
 			int xCordinate = ( 16 * xStartCordinate ) + 16 * xOffset;
-			int yCordinate = ( 16 * yStartCordinate ) + 16 * XAxisFactor * index;
+			int yCordinate = 1 + ( 16 * yStartCordinate ) + 16 * XAxisFactor * index;
 			waterFlow.v( 16 * xStartCordinate , yCordinate );
 			waterFlow.v( xCordinate , yCordinate );
 			xOffset = (int)( TemperatureValues[ index + 1 ] * OffsetFactor );
 			xCordinate = ( 16 * xStartCordinate ) + 16 * xOffset;
-			yCordinate = ( 16 * yStartCordinate ) + 16 * XAxisFactor * ( index + 1 );
+			yCordinate = 1 + ( 16 * yStartCordinate ) + 16 * XAxisFactor * ( index + 1 );
 			waterFlow.v( xCordinate , yCordinate );
 			waterFlow.v( 16 * xStartCordinate , yCordinate );
 			waterFlow.draw();
@@ -304,21 +304,54 @@ void DrawCharts(){
 void DrawBackground(){
 	GD.ClearColorRGB( 0xFFFFFF );
 	GD.Clear();
-	GD.Begin( BITMAPS );
-	GD.Vertex2ii( 0 , 0 );
+
+	GD.Begin(BITMAPS);
+	GD.Vertex2ii( 435 , 5 , INTERFACE_HANDLE , 0 );
+	GD.Vertex2ii( 282 , 8 , INTERFACE_HANDLE , 1 );
+	GD.Vertex2ii( 129 , 7 , INTERFACE_HANDLE , 2 );
+	GD.Vertex2ii( 331 , 238 , AXES_HANDLE , 0 );
+	GD.Vertex2ii( 178 , 238 , AXES_HANDLE , 1 );
+	GD.Vertex2ii( 17 , 239 , SETTINGS_HANDLE );
+
+	DrawChartLines( 182 , 11 );
+	DrawChartLines( 335 , 11 );
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+void DrawChartLines( uint x , uint y ) {
+	GD.Begin( LINES );
+	GD.LineWidth( 10 );
+
+	GD.ColorRGB( 0xD8D8D8 );
+	int width = 3;
+	int offset = 3;
+	float number = 222 / (width+offset);
+
+	for( uint i = 1 ; i < 7 ; i++ ) {
+		for( uint j = 0 ; j < number ; j++ ) {
+			GD.Vertex2ii( x + i*16 , y + j*(width+offset) );
+  			GD.Vertex2ii( x + i*16 , y + j*(width+offset)+width );
+  		}
+	}
+
+	GD.ColorRGB( 0x979797 );
+	GD.Vertex2ii( x , y );
+	GD.Vertex2ii( x , y + 222 );
+
+	GD.LineWidth( 12 );
+	GD.Vertex2ii( x , y );
+	GD.Vertex2ii( x + 102 , y );
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void LoadImages(){
-	//GD.BitmapHandle( 0 );
-	GD.cmd_loadimage( 0 , 0 );
-	GD.load( "bground.jpg" );
+	LOAD_ASSETS();
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void DrawTouchTags(){
-	GD.ColorRGB( 0x00FF00 );
-	GD.ColorA( 100 );
+	GD.ColorRGB( 0xFFFFFF );
+	GD.ColorA( 0 );
 	GD.Begin( RECTS );
 	if( ResetIsShown == true ) {
 		GD.Tag( 1 );
@@ -332,11 +365,10 @@ void DrawTouchTags(){
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void DrawResetButton(){
-	if( ResetIsShown == false ) {
+	if( ResetIsShown == true ) {
 		GD.ColorRGB( 0xFFFFFF );
-		GD.Begin( RECTS );
-		GD.Vertex2ii( 7 , 47 );
-		GD.Vertex2ii( 47 , 223 );
+		GD.Begin(BITMAPS);
+		GD.Vertex2ii( 10 , 60 , INTERFACE_HANDLE , 3 );
 	}
 }
 

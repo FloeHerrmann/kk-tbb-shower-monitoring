@@ -24,7 +24,7 @@
 #define SAMPLES 20
 
 // Milliseconds between two samples
-#define SAMPLES_INTERVALL 3000
+#define SAMPLES_INTERVALL 1000
 
 // Interrupt number 5 = Arduino pin 18
 #define FLOW_SENSOR_PIN 5
@@ -34,6 +34,15 @@
 
 // Pint that is used for the communication with the temperature sensors
 #define ONE_WIRE_BUS_PIN 14
+
+// The flow sensor impulses per litre
+#define IMPULSES_PER_LITER 180.0
+
+// Defines when the reset button will be shown [milliseconds]
+#define RESET_BUTTON_TIMEOUT 30000
+
+// Defines when all values will be cleared [milliseconds]
+#define VALUES_CLEAR_TIMEOUT 300000
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -79,6 +88,15 @@ OneWire OneWireBus( ONE_WIRE_BUS_PIN );
 // Setup a DallesTemperature instance to get temperature from our sensors
 DallasTemperature TemperatureSensors( &OneWireBus );
 
+// Current temperature
+float CurrentTemperature;
+
+// Current total costs
+float CurrentCosts;
+
+// Current total water amount
+float CurrentWater;
+
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void setup() {
 	Serial.begin( 57600 );
@@ -89,21 +107,28 @@ void setup() {
 		TemperatureValues[ index ] = -1.0;
 	}
 
+	// Start the communication with our temperature sensors
+	TemperatureSensors.begin();
+	TemperatureSensors.setResolution( WarmWaterSensorAddress , 9 );
+	TemperatureSensors.requestTemperatures();
+	CurrentTemperature = TemperatureSensors.getTempC( WarmWaterSensorAddress );
+
+	CurrentCosts = 0.0;
+	CurrentWater = 0.0;
+
 	// Initialize display
 	GD.begin();
 	LoadImages();
 	DrawBackground();
 	DrawResetButton();
 	DrawTouchTags();
+	DrawCosts( CurrentCosts );
+	DrawTemperature( CurrentTemperature );
 	GD.swap();
 
 	// Initialize variables
 	SampleTimeHelper = millis();
 	XAxisFactor = (int)( 222.0 / (float)SAMPLES );
-
-	// Start the communication with our temperature sensors
-	TemperatureSensors.begin();
-	TemperatureSensors.setResolution( WarmWaterSensorAddress , 9 );
 
 	// Attach an interrupt for the flow sensor
 	attachInterrupt( FLOW_SENSOR_PIN , CountImpulses , FALLING) ;
@@ -118,10 +143,10 @@ void loop () {
 		ResetIsShown = false;
 	} else if( FlowSensorPulses != 0 ) {
 		ImpulsesTimeHelper = millis();
-	} else if( millis() - ImpulsesTimeHelper > (10*1000) && FlowSensorPulses == 0 && ShowerIsRunning == true ){
+	} else if( millis() - ImpulsesTimeHelper > RESET_BUTTON_TIMEOUT && FlowSensorPulses == 0 && ShowerIsRunning == true ){
 		ResetIsShown = true;
 		ShowerIsRunning = false;
-	} else if( millis() - ImpulsesTimeHelper > (20*1000) && FlowSensorPulses == 0 && ResetIsShown == true ) {
+	} else if( millis() - ImpulsesTimeHelper > VALUES_CLEAR_TIMEOUT && FlowSensorPulses == 0 && ResetIsShown == true ) {
 		ResetIsShown = false;
 		ResetValues();
 	}
@@ -151,10 +176,10 @@ void loop () {
 		if( millis() - SampleTimeHelper >= SAMPLES_INTERVALL ) {
 			float pulsesF = ((float)FlowSensorPulses) / ((float)FLOW_SENSOR_DIVIDER);
 			TemperatureSensors.requestTemperatures();
-			float temperatureF = TemperatureSensors.getTempC( WarmWaterSensorAddress );
+			CurrentTemperature = TemperatureSensors.getTempC( WarmWaterSensorAddress );
 			if( NumberOfSamplesHelper < SAMPLES ) {
 				WaterFlowValues[ NumberOfSamplesHelper ] = pulsesF;
-				TemperatureValues[ NumberOfSamplesHelper ] = temperatureF;
+				TemperatureValues[ NumberOfSamplesHelper ] = CurrentTemperature;
 				NumberOfSamplesHelper++;
 			} else {
 				for( uint index = 0 ; index < (SAMPLES-1) ; index++ ) {
@@ -162,18 +187,29 @@ void loop () {
 					TemperatureValues[ index ] = TemperatureValues[ index + 1 ];
 				}
 				WaterFlowValues[ (SAMPLES-1) ] = pulsesF;
-				TemperatureValues[ (SAMPLES-1) ] = temperatureF;
+				TemperatureValues[ (SAMPLES-1) ] = CurrentTemperature;
 			}
 			TotalFlowSensorPulses += FlowSensorPulses;
 			FlowSensorPulses = 0;
 			SampleTimeHelper = millis();
 		}
+	} else {
+		if( millis() - SampleTimeHelper >= SAMPLES_INTERVALL ) {
+			TemperatureSensors.requestTemperatures();
+			CurrentTemperature = TemperatureSensors.getTempC( WarmWaterSensorAddress );
+		}
 	}
+
+	CurrentWater = (float)TotalFlowSensorPulses / IMPULSES_PER_LITER;
+	CurrentCosts = CurrentWater * 0.04;
 
 	DrawBackground();
 	DrawResetButton();
 	DrawTouchTags();
 	DrawCharts();
+	DrawCosts( CurrentCosts );
+	DrawTemperature( CurrentTemperature );
+	DrawWater( CurrentWater );
 	GD.swap();
 
 }
@@ -249,7 +285,7 @@ void DrawCharts(){
 			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset );
 		}
 	}
-
+/*
 	OffsetFactor = 96.0 / 4.0;
 	xStartCordinate = 336;
 	yStartCordinate = 11;
@@ -297,7 +333,7 @@ void DrawCharts(){
 			waterFlow.draw();
 		}
 	}
-
+*/
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -365,11 +401,16 @@ void DrawTouchTags(){
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void DrawResetButton(){
-	if( ResetIsShown == true ) {
+	GD.ColorRGB( 0xFFFFFF );
+	GD.Begin(BITMAPS);
+	GD.Vertex2ii( 10 , 60 , INTERFACE_HANDLE , 3 );
+	if( ResetIsShown == false ) {
 		GD.ColorRGB( 0xFFFFFF );
-		GD.Begin(BITMAPS);
-		GD.Vertex2ii( 10 , 60 , INTERFACE_HANDLE , 3 );
-	}
+		GD.ColorA( 240 );
+		GD.Begin( RECTS );
+		GD.Vertex2ii( 7 , 47 );
+		GD.Vertex2ii( 47 , 223 );
+	} 
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -381,4 +422,122 @@ void ResetValues(){
 	FlowSensorPulses = 0;
 	TotalFlowSensorPulses = 0;
 	NumberOfSamplesHelper = 0;
+	CurrentCosts = 0.0;
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+void DrawCosts( float value ){
+	GD.ColorRGB( 0xFFFFFF );
+	GD.Begin( BITMAPS );
+	
+	ubyte hundret = value / 100; value -= (hundret*100);
+	ubyte ten = value / 10; value -= (ten*10);
+	ubyte one = value / 1; value -= (one*1);
+	ubyte tenth = value / 0.1; value -= (tenth*0.1);
+	ubyte hundreth = value / 0.01;
+
+	uint width = 150;
+	if( hundret != 0 ) width += 32;
+	if( ten != 0 ) width += 32;
+
+	uint y = ( 272 - width ) / 2;
+	uint x = 75;
+
+	if( hundret != 0 ) {
+		GD.Vertex2ii( x , y , BIG_NUMBERS_HANDLE , hundret );
+		y += 32;
+	}
+	
+	if( ten != 0 || hundret != 0 ) {
+		GD.Vertex2ii( x , y , BIG_NUMBERS_HANDLE , ten );
+		y += 32;
+	}
+	
+	GD.Vertex2ii( x , y , BIG_NUMBERS_HANDLE , one ); y += 32;
+
+	GD.Vertex2ii( x - 15 , y , BIG_SIGNS_HANDLE , 0 ); y += 16;
+
+	GD.Vertex2ii( x , y , BIG_NUMBERS_HANDLE , tenth ); y += 32;
+
+	GD.Vertex2ii( x , y , BIG_NUMBERS_HANDLE , hundreth ); y += 32;
+
+	GD.Vertex2ii( x , y , BIG_SIGNS_HANDLE , 1 );
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+void DrawTemperature( float value ){
+	GD.ColorRGB( 0xFFFFFF );
+	GD.Begin( BITMAPS );
+	
+	ubyte hundret = value / 100; value -= (hundret*100);
+	ubyte ten = value / 10; value -= (ten*10);
+	ubyte one = value / 1; value -= (one*1);
+	ubyte tenth = value / 0.1; value -= (tenth*0.1);
+	ubyte hundreth = value / 0.01;
+
+	uint width = 74;
+	if( hundret != 0 ) width += 13;
+	if( ten != 0 ) width += 13;
+
+	uint y = 272 - width - 5;
+	uint x = 292;
+
+	if( hundret != 0 ) {
+		GD.Vertex2ii( x , y , SMALL_NUMBERS_HANDLE , hundret );
+		y += 13;
+	}
+	
+	if( ten != 0 || hundret != 0 ) {
+		GD.Vertex2ii( x , y , SMALL_NUMBERS_HANDLE , ten );
+		y += 13;
+	}
+	
+	GD.Vertex2ii( x , y , SMALL_NUMBERS_HANDLE , one ); y += 13;
+
+	GD.Vertex2ii( x - 4 , y , SMALL_SIGNS_HANDLE , 0 ); y += 8;
+
+	GD.Vertex2ii( x , y , SMALL_NUMBERS_HANDLE , tenth ); y += 13;
+
+	GD.Vertex2ii( x , y , SMALL_NUMBERS_HANDLE , hundreth ); y += 13;
+
+	GD.Vertex2ii( x , y , SMALL_SIGNS_HANDLE , 1 ); y += 10;
+	GD.Vertex2ii( x - 1 , y , SMALL_SIGNS_HANDLE , 2 );
+}
+
+void DrawWater( float value ) {
+	GD.ColorRGB( 0xFFFFFF );
+	GD.Begin( BITMAPS );
+	
+	ubyte hundret = value / 100; value -= (hundret*100);
+	ubyte ten = value / 10; value -= (ten*10);
+	ubyte one = value / 1; value -= (one*1);
+	ubyte tenth = value / 0.1; value -= (tenth*0.1);
+	ubyte hundreth = value / 0.01;
+
+	uint width = 63;
+	if( hundret != 0 ) width += 13;
+	if( ten != 0 ) width += 13;
+
+	uint y = 272 - width - 5;
+	uint x = 445;
+
+	if( hundret != 0 ) {
+		GD.Vertex2ii( x , y , SMALL_NUMBERS_HANDLE , hundret );
+		y += 13;
+	}
+	
+	if( ten != 0 || hundret != 0 ) {
+		GD.Vertex2ii( x , y , SMALL_NUMBERS_HANDLE , ten );
+		y += 13;
+	}
+	
+	GD.Vertex2ii( x , y , SMALL_NUMBERS_HANDLE , one ); y += 13;
+
+	GD.Vertex2ii( x - 4 , y , SMALL_SIGNS_HANDLE , 0 ); y += 8;
+
+	GD.Vertex2ii( x , y , SMALL_NUMBERS_HANDLE , tenth ); y += 13;
+
+	GD.Vertex2ii( x , y , SMALL_NUMBERS_HANDLE , hundreth ); y += 13;
+
+	GD.Vertex2ii( x , y , SMALL_SIGNS_HANDLE , 4 );
 }

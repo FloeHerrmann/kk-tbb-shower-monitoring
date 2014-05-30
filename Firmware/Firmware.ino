@@ -49,9 +49,13 @@ boolean ResetButtonIsPressed = false;
 boolean SettingsButtonIsPressed = false;
 
 boolean ShowerIsRunning = false;
+boolean ResetIsShown = false;
 
 // Helper variable for taking samples
 ulong SampleTimeHelper = 0;
+
+// Helper variable for the timestamp of the last sample
+ulong ImpulsesTimeHelper = -1;
 
 // Helper variable for the number of taken samples
 uint NumberOfSamplesHelper = 0;
@@ -86,8 +90,9 @@ void setup() {
 
 	// Initialize display
 	GD.begin();
-	LoadBackground();
+	LoadImages();
 	DrawBackground();
+	DrawResetButton();
 	DrawTouchTags();
 	GD.swap();
 
@@ -106,6 +111,21 @@ void setup() {
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void loop () {
 
+	if( FlowSensorPulses != 0 && ShowerIsRunning == false ) {
+		ImpulsesTimeHelper = millis();
+		ShowerIsRunning = true;
+		ResetIsShown = false;
+	} else if( FlowSensorPulses != 0 ) {
+		ImpulsesTimeHelper = millis();
+	} else if( millis() - ImpulsesTimeHelper > (10*1000) && FlowSensorPulses == 0 && ShowerIsRunning == true ){
+		ResetIsShown = true;
+		ShowerIsRunning = false;
+	} else if( millis() - ImpulsesTimeHelper > (20*1000) && FlowSensorPulses == 0 && ResetIsShown == true ) {
+		ResetIsShown = false;
+		ResetValues();
+	}
+
+
 	// Get the input of the touch display and check if something relevant is pressed
 	GD.get_inputs();
 	if( GD.inputs.tag == 1 ) {
@@ -114,9 +134,10 @@ void loop () {
 		SettingsButtonIsPressed = true;
 	} else {
 		if( ResetButtonIsPressed == true ) {
-			Serial.println( "Reset" );
 			delay( 50 );
 			ResetButtonIsPressed = false;
+			ResetIsShown = false;
+			ResetValues();
 		} else if( SettingsButtonIsPressed == true ) {
 			Serial.println( "Settings" );
 			delay( 50 );
@@ -124,36 +145,42 @@ void loop () {
 		}
 	}
 
-	if( millis() - SampleTimeHelper >= SAMPLES_INTERVALL ) {
-		float pulsesF = ((float)FlowSensorPulses) / ((float)FLOW_SENSOR_DIVIDER);
-		TemperatureSensors.requestTemperatures();
-		float temperatureF = TemperatureSensors.getTempC( WarmWaterSensorAddress );
-		if( NumberOfSamplesHelper < SAMPLES ) {
-			WaterFlowValues[ NumberOfSamplesHelper ] = pulsesF;
-			TemperatureValues[ NumberOfSamplesHelper ] = temperatureF;
-			NumberOfSamplesHelper++;
-		} else {
-			for( uint index = 0 ; index < (SAMPLES-1) ; index++ ) {
-				WaterFlowValues[ index ] = WaterFlowValues[ index + 1 ];
-				TemperatureValues[ index ] = TemperatureValues[ index + 1 ];
+	if( ShowerIsRunning == true ) {
+
+		if( millis() - SampleTimeHelper >= SAMPLES_INTERVALL ) {
+			float pulsesF = ((float)FlowSensorPulses) / ((float)FLOW_SENSOR_DIVIDER);
+			TemperatureSensors.requestTemperatures();
+			float temperatureF = TemperatureSensors.getTempC( WarmWaterSensorAddress );
+			if( NumberOfSamplesHelper < SAMPLES ) {
+				WaterFlowValues[ NumberOfSamplesHelper ] = pulsesF;
+				TemperatureValues[ NumberOfSamplesHelper ] = temperatureF;
+				NumberOfSamplesHelper++;
+			} else {
+				for( uint index = 0 ; index < (SAMPLES-1) ; index++ ) {
+					WaterFlowValues[ index ] = WaterFlowValues[ index + 1 ];
+					TemperatureValues[ index ] = TemperatureValues[ index + 1 ];
+				}
+				WaterFlowValues[ (SAMPLES-1) ] = pulsesF;
+				TemperatureValues[ (SAMPLES-1) ] = temperatureF;
 			}
-			WaterFlowValues[ (SAMPLES-1) ] = pulsesF;
-			TemperatureValues[ (SAMPLES-1) ] = temperatureF;
+			TotalFlowSensorPulses += FlowSensorPulses;
+			FlowSensorPulses = 0;
+			SampleTimeHelper = millis();
 		}
-		TotalFlowSensorPulses += FlowSensorPulses;
-		FlowSensorPulses = 0;
-		DrawBackground();
-		DrawTouchTags();
-		DrawCharts();
-		GD.swap();
-		SampleTimeHelper = millis();
 	}
-	
+
+	DrawBackground();
+	DrawResetButton();
+	DrawTouchTags();
+	DrawCharts();
+	GD.swap();
+
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void CountImpulses( ){
 	FlowSensorPulses = FlowSensorPulses + 1;
+	//ImpulsesTimeHelper = millis();
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -282,9 +309,10 @@ void DrawBackground(){
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void LoadBackground(){
+void LoadImages(){
+	//GD.BitmapHandle( 0 );
 	GD.cmd_loadimage( 0 , 0 );
-	GD.load( "bg2.jpg" );
+	GD.load( "bground.jpg" );
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -292,10 +320,33 @@ void DrawTouchTags(){
 	GD.ColorRGB( 0x00FF00 );
 	GD.ColorA( 100 );
 	GD.Begin( RECTS );
-	GD.Tag( 1 );
-	GD.Vertex2ii( 7 , 47 );
-	GD.Vertex2ii( 47 , 222 );
+	if( ResetIsShown == true ) {
+		GD.Tag( 1 );
+		GD.Vertex2ii( 7 , 47 );
+		GD.Vertex2ii( 47 , 223 );
+	}
 	GD.Tag( 2 );
 	GD.Vertex2ii( 11 , 232 );
 	GD.Vertex2ii( 41 , 262 );
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+void DrawResetButton(){
+	if( ResetIsShown == false ) {
+		GD.ColorRGB( 0xFFFFFF );
+		GD.Begin( RECTS );
+		GD.Vertex2ii( 7 , 47 );
+		GD.Vertex2ii( 47 , 223 );
+	}
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+void ResetValues(){
+	for( uint16_t index = 0 ; index < SAMPLES ; index++ ) {
+		WaterFlowValues[ index ] = -1.0;
+		TemperatureValues[ index ] = -1.0;
+	}
+	FlowSensorPulses = 0;
+	TotalFlowSensorPulses = 0;
+	NumberOfSamplesHelper = 0;
 }

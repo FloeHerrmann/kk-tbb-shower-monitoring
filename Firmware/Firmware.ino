@@ -99,8 +99,8 @@ uint NumberOfSamplesHelper = 0;
 uint XAxisFactor = 0;
 
 // Helper array for the addresses of our temperature sensors
-//DeviceAddress WarmWaterSensorAddress = { 0x28, 0xFE , 0x02 , 0x5D , 0x05 , 0x00 , 0x00 , 0x8C };
-DeviceAddress WarmWaterSensorAddress = { 0x28, 0xF1 , 0xAC , 0x61 , 0x05 , 0x00 , 0x00 , 0x63 };
+DeviceAddress WarmWaterSensorAddress = { 0x28, 0xFE , 0x02 , 0x5D , 0x05 , 0x00 , 0x00 , 0x8C };
+//DeviceAddress WarmWaterSensorAddress = { 0x28, 0xF1 , 0xAC , 0x61 , 0x05 , 0x00 , 0x00 , 0x63 };
 DeviceAddress ColdWaterSensorAddress = { 0x28, 0x7A , 0x61 , 0x5D , 0x05 , 0x00 , 0x00 , 0xE5 };
 
 // Counter for the impulses of the flow sensor during the last sample interval
@@ -179,6 +179,7 @@ void loop () {
 			ResetValues();
 			SettingsIsShown = true;
 			ResetIsShown = false;
+			DrawMainScreen( CurrentCosts );
 			break;
 		case 102:
 			CurrentScreen = SCREEN_SETTINGS_WATER;

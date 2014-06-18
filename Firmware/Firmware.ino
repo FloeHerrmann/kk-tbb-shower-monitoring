@@ -62,7 +62,8 @@
 float WaterFlowValues[SAMPLES];
 
 // Array for storing the temperature samples
-float TemperatureValues[SAMPLES];
+float TemperatureWarmValues[SAMPLES];
+float TemperatureColdValues[SAMPLES];
 
 // Is true if the "Reset" button is pressed, otherwise false
 boolean ResetButtonIsPressed = false;
@@ -121,7 +122,7 @@ float CurrentWarmWaterTemperature;
 float CurrentColdWaterTemperature;
 
 // Current total costs
-float CurrentCosts = 0.0;
+volatile float CurrentCosts = 0.0;
 
 // Current total water amount
 float CurrentWater = 0.0;
@@ -129,23 +130,17 @@ float CurrentWater = 0.0;
 // Current screen that is displayed
 ubyte CurrentScreen;
 
-bool TouchTagsHelper[30];
-
 float SettingsWaterCosts = 0.0;
 float SettingsEnergyCosts = 0.0;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void setup() {
-	Serial.begin( 57600 );
 
 	// Initialize value arrays
 	for( uint16_t index = 0 ; index < SAMPLES ; index++ ) {
 		WaterFlowValues[ index ] = -1.0;
-		TemperatureValues[ index ] = -1.0;
-	}
-
-	for( uint16_t index = 0 ; index < 30 ; index++ ) {
-		TouchTagsHelper[ index ] = false;
+		TemperatureWarmValues[ index ] = -1.0;
+		TemperatureColdValues[ index ] = -1.0;
 	}
 
 	// Start the communication with our temperature sensors
@@ -168,7 +163,7 @@ void setup() {
 	XAxisFactor = (int)( 222.0 / (float)SAMPLES );
 	CurrentScreen = SCREEN_MAIN;
 
-	DrawMainScreen();
+	DrawMainScreen( CurrentCosts );
 
 	// Attach an interrupt for the flow sensor
 	attachInterrupt( FLOW_SENSOR_PIN , CountImpulses , FALLING) ;
@@ -179,16 +174,6 @@ void loop () {
 
 	// Get the input of the touch display and check if something relevant is pressed
 	GD.get_inputs();
-	/*if( GD.inputs.x >= 0 && GD.inputs.x <= 479 ) {
-		if( GD.inputs.y >= 0 && GD.inputs.y <= 271) {
-			Serial.print( GD.inputs.x );
-			Serial.print( " , " );
-			Serial.print( GD.inputs.y );
-			Serial.print( " , " );
-			Serial.println( GD.inputs.tag );
-		}
-	}*/
-
 	switch( GD.inputs.tag ) {
 		case 101:
 			ResetValues();
@@ -200,14 +185,14 @@ void loop () {
 			DrawSettingsScreen();
 			break;
 		case 103:
-			DrawMainScreen();
+			DrawMainScreen( CurrentCosts );
 			CurrentScreen = SCREEN_MAIN;
 			break;
 		case 104:
 			EEPROMWriteFloat( &SettingsWaterCosts , 4000 );
 			EEPROMWriteFloat( &SettingsEnergyCosts , 4020 );
 			CurrentScreen = SCREEN_MAIN;
-			DrawMainScreen();
+			DrawMainScreen( CurrentCosts );
 			break;
 		case 105:
 			DrawSettingsScreen();
@@ -249,38 +234,50 @@ void loop () {
 			break;
 	}
 
-	if( millis() - SampleTimeHelper >= SAMPLES_INTERVALL && CurrentScreen == SCREEN_MAIN ) {
+	long timeDifference = millis() - SampleTimeHelper;
+	if( timeDifference >= SAMPLES_INTERVALL && CurrentScreen == SCREEN_MAIN ) {
 		if( ShowerIsRunning == true ) {
+
 			float pulsesF = ((float)FlowSensorPulses) / ((float)IMPULSES_PER_LITER);
-			pulsesF = pulsesF * (60000/SAMPLES_INTERVALL);
 			TemperatureSensors.requestTemperatures();
 			CurrentWarmWaterTemperature = TemperatureSensors.getTempC( WarmWaterSensorAddress );
 			CurrentColdWaterTemperature = TemperatureSensors.getTempC( ColdWaterSensorAddress );
+
+			float energy = ((pulsesF*1000.0)/float(timeDifference)) * 4.2 * ( CurrentWarmWaterTemperature - CurrentColdWaterTemperature );
+			float costs = energy * (float(timeDifference)/3600000.0) * SettingsEnergyCosts;
+
+			CurrentCosts = CurrentCosts + ( pulsesF * SettingsWaterCosts ) + costs;
+
+			pulsesF = pulsesF * (60000/timeDifference);
 			if( NumberOfSamplesHelper < SAMPLES ) {
 				WaterFlowValues[ NumberOfSamplesHelper ] = pulsesF;
-				TemperatureValues[ NumberOfSamplesHelper ] = CurrentWarmWaterTemperature;
+				TemperatureWarmValues[ NumberOfSamplesHelper ] = CurrentWarmWaterTemperature;
+				TemperatureColdValues[ NumberOfSamplesHelper ] = CurrentColdWaterTemperature;
 				NumberOfSamplesHelper++;
 			} else {
 				for( uint index = 0 ; index < (SAMPLES-1) ; index++ ) {
 					WaterFlowValues[ index ] = WaterFlowValues[ index + 1 ];
-					TemperatureValues[ index ] = TemperatureValues[ index + 1 ];
+					TemperatureWarmValues[ index ] = TemperatureWarmValues[ index + 1 ];
+					TemperatureColdValues[ index ] = TemperatureColdValues[ index + 1 ];
+
 				}
 				WaterFlowValues[ (SAMPLES-1) ] = pulsesF;
-				TemperatureValues[ (SAMPLES-1) ] = CurrentWarmWaterTemperature;
+				TemperatureWarmValues[ (SAMPLES-1) ] = CurrentWarmWaterTemperature;
+				TemperatureColdValues[ (SAMPLES-1) ] = CurrentColdWaterTemperature;
 			}
 			TotalFlowSensorPulses += FlowSensorPulses;
+
 			CurrentWater = ((float)TotalFlowSensorPulses) / ((float)IMPULSES_PER_LITER);
-			CurrentCosts = CurrentWater * 0.04;
+		
 			FlowSensorPulses = 0;
 			SampleTimeHelper = millis();
-			DrawMainScreen();
+			DrawMainScreen( CurrentCosts );
 		} else {
 			TemperatureSensors.requestTemperatures();
 			CurrentWarmWaterTemperature = TemperatureSensors.getTempC( WarmWaterSensorAddress );
 			CurrentColdWaterTemperature = TemperatureSensors.getTempC( ColdWaterSensorAddress );
-			DrawMainScreen();
+			DrawMainScreen( CurrentCosts );
 		}
-		Serial.println( CurrentColdWaterTemperature );
 	}
 
 	if( FlowSensorPulses != 0 && ShowerIsRunning == false ) {
@@ -301,112 +298,7 @@ void loop () {
 		}
 	}
 
-/*
-	if( GD.inputs.tag == 1 ) {
-		ResetButtonIsPressed = false;
-		ResetIsShown = false;
-		SettingsIsShown = true;
-		ResetValues();
-	} else if( GD.inputs.tag == 2 ) {
-		CurrentScreen = SCREEN_SETTINGS_WATER;
-		DrawSettingsScreen();
-	} else if( GD.inputs.tag == 3 ) {
-		CurrentScreen = SCREEN_MAIN;
-		DrawMainScreenTest();
-	} else if( GD.inputs.tag == 4 ) {
-		SaveButtonIsPressed = true;
-	} else if( GD.inputs.tag >= 10 && GD.inputs.tag <= 30 ) {
-		TouchTagsHelper[ GD.inputs.tag ] = true;
-	} else {
-		if( ResetButtonIsPressed == true ) {
-			
-		} else if( SettingsButtonIsPressed == true ) {
-			delay( 50 );
-			SettingsButtonIsPressed = false;
-			CurrentScreen = SCREEN_SETTINGS_WATER;
-		} else if( BackButtonIsPressed == true ) {
-			delay( 50 );
-			EEPROMReadFloat( &SettingsWaterCosts , 4000 );
-			EEPROMReadFloat( &SettingsEnergyCosts , 4020 );
-			BackButtonIsPressed = false;
-			CurrentScreen = SCREEN_MAIN;
-		} else if( SaveButtonIsPressed == true ) {
-			delay( 50 );
-			SaveButtonIsPressed = false;
-			EEPROMWriteFloat( &SettingsWaterCosts , 4000 );
-			EEPROMWriteFloat( &SettingsEnergyCosts , 4020 );
-			CurrentScreen = SCREEN_MAIN;
-		}  else {
-			if( TouchTagsHelper[10] == true ) { 
-				if( CurrentScreen == SCREEN_SETTINGS_WATER ) SettingsWaterCosts -= 100.0;
-				if( CurrentScreen == SCREEN_SETTINGS_ENERGY ) SettingsEnergyCosts -= 100.0;
-			}
-			if( TouchTagsHelper[11] == true ) { 
-				if( CurrentScreen == SCREEN_SETTINGS_WATER ) SettingsWaterCosts += 100.0;
-				if( CurrentScreen == SCREEN_SETTINGS_ENERGY ) SettingsEnergyCosts += 100.0;
-			}
-			if( TouchTagsHelper[12] == true ) { 
-				if( CurrentScreen == SCREEN_SETTINGS_WATER ) SettingsWaterCosts -= 10.0;
-				if( CurrentScreen == SCREEN_SETTINGS_ENERGY ) SettingsEnergyCosts -= 10.0;
-			}
-			if( TouchTagsHelper[13] == true ) { 
-				if( CurrentScreen == SCREEN_SETTINGS_WATER ) SettingsWaterCosts += 10.0;
-				if( CurrentScreen == SCREEN_SETTINGS_ENERGY ) SettingsEnergyCosts += 10.0;
-			}
-			if( TouchTagsHelper[14] == true ) { 
-				if( CurrentScreen == SCREEN_SETTINGS_WATER ) SettingsWaterCosts -= 1.00;
-				if( CurrentScreen == SCREEN_SETTINGS_ENERGY ) SettingsEnergyCosts -= 1.00;
-			}
-			if( TouchTagsHelper[15] == true ) { 
-				if( CurrentScreen == SCREEN_SETTINGS_WATER ) SettingsWaterCosts += 1.00;
-				if( CurrentScreen == SCREEN_SETTINGS_ENERGY ) SettingsEnergyCosts += 1.00;
-			}
-			if( TouchTagsHelper[16] == true ) { 
-				if( CurrentScreen == SCREEN_SETTINGS_WATER ) SettingsWaterCosts -= 0.10;
-				if( CurrentScreen == SCREEN_SETTINGS_ENERGY ) SettingsEnergyCosts -= 0.10;
-			}
-			if( TouchTagsHelper[17] == true ) { 
-				if( CurrentScreen == SCREEN_SETTINGS_WATER ) SettingsWaterCosts += 0.10;
-				if( CurrentScreen == SCREEN_SETTINGS_ENERGY ) SettingsEnergyCosts += 0.10;
-			}
-			if( TouchTagsHelper[18] == true ) { 
-				if( CurrentScreen == SCREEN_SETTINGS_WATER ) SettingsWaterCosts -= 0.01;
-				if( CurrentScreen == SCREEN_SETTINGS_ENERGY ) SettingsEnergyCosts -= 0.01;
-			}
-			if( TouchTagsHelper[19] == true ) { 
-				if( CurrentScreen == SCREEN_SETTINGS_WATER ) SettingsWaterCosts += 0.01;
-				if( CurrentScreen == SCREEN_SETTINGS_ENERGY ) SettingsEnergyCosts += 0.01;
-			}
-
-			if( SettingsWaterCosts < 0 ) SettingsWaterCosts = 0.0;
-			else if( SettingsWaterCosts > 999.99 ) SettingsWaterCosts = 999.99;
-			if( SettingsEnergyCosts < 0 ) SettingsEnergyCosts = 0.0;
-			else if( SettingsEnergyCosts > 999.99 ) SettingsEnergyCosts = 999.99;
-			for( uint16_t index = 10 ; index < 30 ; index++ ) TouchTagsHelper[ index ] = false;
-		}
-		
-	}
-	*/
-
-/*
-	if( CurrentScreen == SCREEN_MAIN ) {
-		DrawMainScreen();
-		DrawResetButton();
-		DrawTouchTags();
-		DrawCharts();
-		DrawCosts( CurrentCosts );
-		DrawTemperature( CurrentWarmWaterTemperature );
-		DrawWater( CurrentWater );
-	} else if( CurrentScreen == SCREEN_SETTINGS_WATER ) {
-		DrawSettingscreen();
-		DrawSaveButton();
-		//DrawWaterCosts( SettingsWaterCosts );
-		//DrawEnergyCosts( SettingsEnergyCosts );
-		DrawTouchTags();
-	}
-	GD.swap();
-*/
-	delay( 100 );
+	//delay( 100 );
 
 }
 
@@ -433,7 +325,8 @@ void CountImpulses( ){
 void ResetValues(){
 	for( uint16_t index = 0 ; index < SAMPLES ; index++ ) {
 		WaterFlowValues[ index ] = -1.0;
-		TemperatureValues[ index ] = -1.0;
+		TemperatureWarmValues[ index ] = -1.0;
+		TemperatureColdValues[ index ] = -1.0;
 	}
 	FlowSensorPulses = 0;
 	TotalFlowSensorPulses = 0;
@@ -447,7 +340,7 @@ void LoadImages(){
 	LOAD_ASSETS();
 }
 
-void DrawMainScreen(){
+void DrawMainScreen( float TotalCosts ){
 	GD.ClearColorRGB( 0xFFFFFF );
 	GD.Clear();
 	GD.ColorRGB( 0xFFFFFF );
@@ -512,14 +405,16 @@ void DrawMainScreen(){
 
 	GD.ColorRGB( 0xFFFFFF );
 	GD.ColorA( 255 );
-
-	DrawCharts();
 	
-	DrawCosts( CurrentCosts );
+	DrawCosts( TotalCosts );
 	
 	DrawTemperature( CurrentWarmWaterTemperature );
 	
 	DrawWater( CurrentWater );
+
+	DrawCharts();
+
+	FillCharts();
 
 	GD.swap();
 }
@@ -626,9 +521,15 @@ void DrawSettingsScreen(){
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void DrawCharts(){
 
+	// Water
+
 	float OffsetFactor = 96.0 / 12.0;
 	uint xStartCordinate = 340;
 	uint yStartCordinate = 11;
+
+	float xOffsetF = 0.0;
+	int xOffset = 0;
+	int yOffset = 0;
 
 	GD.ColorRGB( 151 , 187 , 205 );
 	GD.ColorA( 255 );
@@ -637,9 +538,9 @@ void DrawCharts(){
 
   	for( uint16_t index = 0 ; index < SAMPLES ; index++ ) {
   		if( WaterFlowValues[index] != -1.0 ) {
-			float xOffsetF = WaterFlowValues[ index ] * OffsetFactor;
-			int xOffset = (int)xOffsetF;
-			int yOffset = index * XAxisFactor;
+			xOffsetF = WaterFlowValues[ index ] * OffsetFactor;
+			xOffset = (int)xOffsetF;
+			yOffset = index * XAxisFactor;
 			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset );
 		}
 	}
@@ -651,12 +552,14 @@ void DrawCharts(){
 
 	for( uint16_t index = 0 ; index < SAMPLES ; index++ ) {
 		if( WaterFlowValues[ index ] != -1.0 ) {
-			float xOffsetF = WaterFlowValues[ index ] * OffsetFactor;
-			int xOffset = (int)xOffsetF;
-			int yOffset = index * XAxisFactor;
-			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset );
+			xOffsetF = WaterFlowValues[ index ] * OffsetFactor;
+			xOffset = (int)xOffsetF;
+			yOffset = index * XAxisFactor;
+			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset - 1 );
 		}
 	}
+
+	// Temperature (Warm)
 
 	OffsetFactor = 96.0 / 60.0;
 	xStartCordinate = 184;
@@ -664,80 +567,174 @@ void DrawCharts(){
 
 	GD.ColorRGB( 208 , 2 , 27 );
 	GD.ColorA( 255 );
+
 	GD.LineWidth( 1 * 10 );
   	GD.Begin( LINE_STRIP );
 
   	for( uint16_t index = 0 ; index < SAMPLES ; index++ ) {
-  		if( TemperatureValues[index] != -1.0 ) {
-			float xOffsetF = TemperatureValues[ index ] * OffsetFactor;
-			int xOffset = (int)xOffsetF;
-			int yOffset = index * XAxisFactor;
+  		if( TemperatureWarmValues[index] != -1.0 ) {
+			xOffsetF = TemperatureWarmValues[ index ] * OffsetFactor;
+			xOffset = (int)xOffsetF;
+			yOffset = index * XAxisFactor;
 			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset );
 		}
 	}
 
+	// Temperature ( Cold )
+
+	GD.ColorRGB( 151 , 187 , 205 );
+	GD.ColorA( 255 );
+
+	GD.LineWidth( 1 * 10 );
+  	GD.Begin( LINE_STRIP );
+
+  	for( uint16_t index = 0 ; index < SAMPLES ; index++ ) {
+  		if( TemperatureColdValues[index] != -1.0 ) {
+			xOffsetF = TemperatureColdValues[ index ] * OffsetFactor;
+			xOffset = (int)xOffsetF;
+			yOffset = index * XAxisFactor;
+			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset );
+		}
+	}
+
+	// Temperature (Warm)
+
 	GD.ColorRGB( 208 , 2 , 27 );
 	GD.ColorA( 255 );
+
 	GD.PointSize( 16 * 2 );
 	GD.Begin( POINTS );
 
 	for( uint16_t index = 0 ; index < SAMPLES ; index++ ) {
-		if( TemperatureValues[ index ] != -1.0 ) {
-			float xOffsetF = TemperatureValues[ index ] * OffsetFactor;
-			int xOffset = (int)xOffsetF;
-			int yOffset = index * XAxisFactor;
+		if( TemperatureWarmValues[ index ] != -1.0 ) {
+			xOffsetF = TemperatureWarmValues[ index ] * OffsetFactor;
+			xOffset = (int)xOffsetF;
+			yOffset = index * XAxisFactor;
 			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset );
 		}
 	}
-/*
-	OffsetFactor = 96.0 / 4.0;
-	xStartCordinate = 336;
-	yStartCordinate = 11;
+
+	// Temperature (Warm)
+
+	GD.ColorRGB( 151 , 187 , 205 );
+	GD.ColorA( 255 );
+
+	GD.PointSize( 16 * 2 );
+	GD.Begin( POINTS );
+
+	for( uint16_t index = 0 ; index < SAMPLES ; index++ ) {
+		if( TemperatureColdValues[ index ] != -1.0 ) {
+			xOffsetF = TemperatureColdValues[ index ] * OffsetFactor;
+			xOffset = (int)xOffsetF;
+			yOffset = index * XAxisFactor;
+			GD.Vertex2ii( xStartCordinate + xOffset , yStartCordinate + yOffset );
+		}
+	}
+}
+
+void FillCharts(){
+
+	Poly polygon;
+
+	int xOffset = 0;
+	int xCordinate = 0;
+	int yCordinate = 0;
+
+	float OffsetFactor = 96.0 / 12.0;
+	uint xStartCordinate = 341;
+	uint yStartCordinate = 11;
+
+	GD.ColorRGB( 151 , 187 , 205 );
+	GD.ColorA( 80 );
 
 	for( uint16_t index = 0 ; index < (SAMPLES-1) ; index++ ) {
-		if( WaterFlowValues[ index + 1 ] != -1.0 ) {
-			GD.ColorRGB( 151 , 187 , 205 );
-			GD.ColorA( 80 );
-			Poly waterFlow;
-			waterFlow.begin();
-			int xOffset = (int)( WaterFlowValues[ index ] * OffsetFactor );
-			int xCordinate = ( 16 * xStartCordinate ) + 16 * xOffset;
-			int yCordinate = 1 + ( 16 * yStartCordinate ) + 16 * XAxisFactor * index;
-			waterFlow.v( 16 * xStartCordinate , yCordinate );
-			waterFlow.v( xCordinate , yCordinate );
+		if( WaterFlowValues[ index + 1 ] != -1.0 ) {			
+			polygon.begin();
+
+			xOffset = (int)( WaterFlowValues[ index ] * OffsetFactor );
+			xCordinate = 16 * xStartCordinate + 16 * xOffset;
+			yCordinate = 16 * yStartCordinate + 16 * XAxisFactor * index;
+
+			polygon.v( 16 * ( xStartCordinate + 1 ) , yCordinate + 16 );
+			polygon.v( xCordinate , yCordinate + 16 );
+			
 			xOffset = (int)( WaterFlowValues[ index + 1 ] * OffsetFactor );
-			xCordinate = ( 16 * xStartCordinate ) + 16 * xOffset;
-			yCordinate = 1 + ( 16 * yStartCordinate ) + 16 * XAxisFactor * ( index + 1 );
-			waterFlow.v( xCordinate , yCordinate );
-			waterFlow.v( 16 * xStartCordinate , yCordinate );
-			waterFlow.draw();
+			xCordinate = 16 * ( xStartCordinate + 1 ) + 16 * xOffset;
+			yCordinate = 16 * yStartCordinate + 16 * XAxisFactor * ( index + 1 );
+			
+			polygon.v( xCordinate , yCordinate + 16 );
+			polygon.v( 16 * xStartCordinate , yCordinate + 16 );
+			
+			polygon.draw();
 		}
 	}
 
 	OffsetFactor = 96.0 / 60.0;
-	xStartCordinate = 183;
+	xStartCordinate = 185;
 	yStartCordinate = 11;
 
+	// Temperatur (Cold)
+
+	GD.ColorRGB( 151 , 187 , 205 );
+	GD.ColorA( 60 );
+
 	for( uint16_t index = 0 ; index < (SAMPLES-1) ; index++ ) {
-		if( TemperatureValues[ index + 1 ] != -1.0 ) {
-			GD.ColorRGB( 208 , 2 , 27 );
-			GD.ColorA( 60 );
-			Poly waterFlow;
-			waterFlow.begin();
-			int xOffset = (int)( TemperatureValues[ index ] * OffsetFactor );
-			int xCordinate = ( 16 * xStartCordinate ) + 16 * xOffset;
-			int yCordinate = 1 + ( 16 * yStartCordinate ) + 16 * XAxisFactor * index;
-			waterFlow.v( 16 * xStartCordinate , yCordinate );
-			waterFlow.v( xCordinate , yCordinate );
-			xOffset = (int)( TemperatureValues[ index + 1 ] * OffsetFactor );
-			xCordinate = ( 16 * xStartCordinate ) + 16 * xOffset;
-			yCordinate = 1 + ( 16 * yStartCordinate ) + 16 * XAxisFactor * ( index + 1 );
-			waterFlow.v( xCordinate , yCordinate );
-			waterFlow.v( 16 * xStartCordinate , yCordinate );
-			waterFlow.draw();
+		if( TemperatureColdValues[ index + 1 ] != -1.0 ) {
+			polygon.begin();
+
+			yCordinate = 16 * yStartCordinate + 16 * XAxisFactor * index;
+
+			xOffset = (int)( TemperatureColdValues[ index ] * OffsetFactor );
+			xCordinate = 16 * xStartCordinate + 16 * xOffset;
+			yCordinate = 16 * yStartCordinate + 16 * XAxisFactor * index;
+
+			polygon.v( 16 * xStartCordinate , yCordinate );
+			polygon.v( xCordinate , yCordinate );
+
+			xOffset = (int)( TemperatureColdValues[ index + 1 ] * OffsetFactor );
+			xCordinate = 16 * xStartCordinate + 16 * xOffset;
+			yCordinate = 16 * yStartCordinate + 16 * XAxisFactor * ( index + 1 );
+
+			polygon.v( xCordinate , yCordinate );
+			polygon.v( 16 * xStartCordinate , yCordinate );
+
+			polygon.draw();
 		}
 	}
-*/
+
+	GD.ColorRGB( 208 , 2 , 27 );
+	GD.ColorA( 60 );
+
+	int xOffsetCold, xCordinateCold;
+
+	for( uint16_t index = 0 ; index < (SAMPLES-1) ; index++ ) {
+		if( TemperatureWarmValues[ index + 1 ] != -1.0 ) {
+			polygon.begin();
+
+			xOffsetCold = (int)( TemperatureColdValues[ index ] * OffsetFactor );
+			xCordinateCold = 16 * xStartCordinate + 16 * xOffsetCold;
+
+			xOffset = (int)( TemperatureWarmValues[ index ] * OffsetFactor );
+			xCordinate = 16 * xStartCordinate + 16 * xOffset;
+			yCordinate = 16 * yStartCordinate + 16 * XAxisFactor * index;
+
+			polygon.v( xCordinateCold , yCordinate );
+			polygon.v( xCordinate , yCordinate );
+
+			xOffsetCold = (int)( TemperatureColdValues[ index + 1 ] * OffsetFactor );
+			xCordinateCold = 16 * xStartCordinate + 16 * xOffsetCold;
+
+			xOffset = (int)( TemperatureWarmValues[ index + 1 ] * OffsetFactor );
+			xCordinate = 16 * xStartCordinate + 16 * xOffset;
+			yCordinate = 16 * yStartCordinate + 16 * XAxisFactor * ( index + 1 );
+
+			polygon.v( xCordinate , yCordinate );
+			polygon.v( xCordinateCold , yCordinate );
+
+			polygon.draw();
+		}
+	}
+
 	GD.ColorRGB( 0xFFFFFF );
 	GD.ColorA( 255 );
 }
@@ -763,21 +760,32 @@ void DrawChartLines( uint x , uint y ) {
 	GD.Vertex2ii( x , y );
 	GD.Vertex2ii( x , y + 222 );
 
-	GD.LineWidth( 12 );
-	GD.Vertex2ii( x , y );
-	GD.Vertex2ii( x + 102 , y );
+	// GD.LineWidth( 12 );
+	// GD.Vertex2ii( x , y );
+	// GD.Vertex2ii( x + 102 , y );
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-void DrawCosts( float value ){
+void DrawCosts( float valueF ){
 	GD.ColorRGB( 0xFFFFFF );
 	GD.Begin( BITMAPS );
 	
-	ubyte hundret = value / 100; value -= (hundret*100);
-	ubyte ten = value / 10; value -= (ten*10);
-	ubyte one = value / 1; value -= (one*1);
-	ubyte tenth = value / 0.1; value -= (tenth*0.1);
-	ubyte hundreth = value / 0.01;
+	ulong value = floor( valueF );
+
+	ubyte hundret = floor( value / 10000 ); 
+	value = value - hundret * 10000;
+	
+	ubyte ten = floor( value / 1000 );
+	value = value - ten * 1000;
+	
+	ubyte one = floor( value / 100 );
+	value = value - one * 100;
+	
+	ubyte tenth = floor( value / 10 );
+	value = value - tenth * 10;
+
+	ubyte hundreth = floor( value / 1 );
+	value = value - hundreth * 1;
 
 	uint width = 150;
 	if( hundret != 0 ) width += 32;

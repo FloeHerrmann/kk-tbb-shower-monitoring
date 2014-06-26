@@ -244,10 +244,10 @@ void loop () {
 			CurrentWarmWaterTemperature = TemperatureSensors.getTempC( WarmWaterSensorAddress );
 			CurrentColdWaterTemperature = TemperatureSensors.getTempC( ColdWaterSensorAddress );
 
-			float energy = ((pulsesF*1000.0)/float(timeDifference)) * 4.2 * ( CurrentWarmWaterTemperature - CurrentColdWaterTemperature );
-			float costs = energy * (float(timeDifference)/3600000.0) * SettingsEnergyCosts;
-
-			CurrentCosts = CurrentCosts + ( pulsesF * SettingsWaterCosts ) + costs;
+			float heatQuantity = pulsesF * 4.19 * ( CurrentWarmWaterTemperature - CurrentColdWaterTemperature ); // kJ
+			float energyCosts = ( heatQuantity / 3600.0 ) * SettingsEnergyCosts; // Cent
+			float waterCosts = pulsesF * SettingsWaterCosts; // Cent
+			CurrentCosts = CurrentCosts + energyCosts + waterCosts; // Cent
 
 			pulsesF = pulsesF * (60000/timeDifference);
 			if( NumberOfSamplesHelper < SAMPLES ) {
